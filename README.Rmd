@@ -1,0 +1,59 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Jonkershoek eddy covariance
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+## Project Description
+
+The goal of `flux_jonkershoek` is to set up a project focused on forecasting flux data from the Jonkershoek valley, South Africa, for the near-term ecological forecasting course run by the African Chapter of the Ecological Forecasting Initiative, Ecoforecast Africa (https://ecoforecast.africa/). See https://ecoforecast.africa/events/.
+
+## Data Overview
+
+The data are from the South African Environmental Observation Network (SAEON). The project will focus on flux data from the eddy covariance system at Swartboschkloof. These observations are part of the Jonkershoek long term study site run by the SAEON Fynbos Node (https://fynbos.saeon.ac.za/). The site has a long history of environmental observations, starting with a multiple catchment experiment in the 1940s. More details are available in Slingsby et al. 2021. Jonkershoek: Africa’s Oldest Catchment Experiment ‐ 80 Years and Counting. Hydrological Processes, https://doi.org/10.1002/hyp.14101.
+
+The data we'll use run from from 2019 to the near-present. 
+
+![The eddy covaroance system at Jonkershoek.](img/jonkershoek_ec.jpg)
+
+## Data Download
+
+For this you will need to replace `"dropbox_link"` with the actual link to the data file provided as part of the course. The link should be set to allow direct download. The code below will set the link to allow direct download, download the data file and save it in your `data` directory. Note that the contents of this directory will not be tracked by git as it is told to ignore it in the `.gitignore` file.
+
+You also need to change the R chunk setting from `eval = FALSE` to `eval = TRUE`
+
+```{r download data, eval = FALSE}
+# Create data directory if it doesn't exist
+if (!dir.exists("data")) {
+  dir.create("data")
+}
+
+# Dropbox link (replace with your actual link)
+dropbox_link <- "dropbox_link"
+
+download_link <- sub("dl=0", "dl=1", dropbox_link)
+
+download.file(download_link, destfile = "data/Jonkershoek_EC_all.csv")
+```
+
+## Read the data
+
+```{r}
+library(tidyverse)
+
+ecdat <- read_delim("data/Jonkershoek_EC_all.csv", delim = ";")
+```
+
+
