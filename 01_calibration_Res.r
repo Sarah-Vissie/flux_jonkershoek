@@ -9,33 +9,9 @@ library(tidyverse)
 
 # Run the first few code chunks in the README.Rmd file to read in the data and do some cleaning.
 
-ecdat <- read_delim("data/Jonkershoek_EC_all.csv", delim = ";")
-ecdat$time = lubridate::parse_date_time(ecdat$TIMESTAMP,orders = "ymd HM")
-
-ecdat$LE[which(ecdat$LE > 400)] = NA ## remove implausible values
-ecdat$LE[which(ecdat$LE < -100)] = NA ## remove implausible values
-hist(ecdat$LE,breaks = 100)
-
-ecdat$Fc_molar[which(ecdat$Fc_molar > 20)] = NA ## remove implausible values
-ecdat$Fc_molar[which(ecdat$Fc_molar < -30)] = NA ## remove implausible values
-hist(ecdat$Fc_molar,breaks = 100)
-
-## ustar filtering
-ecdat$Fc_molar[which(ecdat$u_star < 0.3)] = NA
-ecdat$LE[which(ecdat$u_star < 0.3)] = NA
-
-## quality control filtering
-## scores defined in Appendix F of EasyFlux manual, with 1 being the best score and 9 being the worst
-ecdat$Fc_molar[which(ecdat$Fc_qc_grade > 6)] = NA
-ecdat$LE[which(ecdat$LE_qc_grade > 6)] = NA
-
-# This code take it from there.
-
-month = lubridate::month(ecdat$time)
-year = lubridate::year(ecdat$time)
-
+ecdat <- ingest_and_qa()
 # pick a subset (one month)
-ecdat_sub <- ecdat[month==3 & year==2022,]
+ecdat_sub <- ecdat[ecdat$month=="03" & ecdat$year=="2022",]
 
 hist(ecdat_sub$Fc_molar)
 
@@ -100,6 +76,12 @@ dic.samples(j.model, 2000)
 jags.out   <- coda.samples (model = j.model,
                               variable.names = c("x","tau_add","tau_obs"),
                               n.iter = 10000)
+
+
+time.rng = c(1,length(ecdat_sub$time))       ## adjust to zoom in and out
+out <- as.matrix(jags.out)         ## convert from coda to matrix
+x.cols <- grep("^x",colnames(out)) ## grab all columns that start with the letter x
+ci_randomwalk <- apply(out[,x.cols],2,quantile,c(0.025,0.5,0.975)) ## model was fit on log scale
 
 
 # plot time series and fitted model
@@ -203,33 +185,100 @@ dev.off()
 
 # Extract CI from the output matrix from jags.out 
 summary(jags.out)
-out.matrix <- as.matrix(jags.out)
-out.matrix[,1:5] # first 5 colums stores b1, b2, rho, tau_add, tau_obs, 3000 rows
+out.matrix <- as.matrix(jags.out) 
 
-ci <- apply(out.matrix[,1:5],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
-t(ci)
+ci_statespace <- apply(out.matrix[,grep("^x",colnames(out.matrix))],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
+t(ci_statespace)
 
-pred_obs_df_timelight = as.data.frame(t(ci), row.names = F) %>%
-  rename(ci_lower = "2.5%", predicted_NEE = "50%", ci_upper = "97.5%") %>%
+# # # # 
+
+# Form validation datasets ************
+
+# Randomwalk
+pred_obs_df_randomwalk = as.data.frame(t(ci_randomwalk), row.names = F) %>%
+  rename(pi_lower = "2.5%", predicted_NEE = "50%", pi_upper = "97.5%") %>%
+  mutate(time = ecdat_sub$time,
+         doy = ecdat_sub$doy,
+         hod = ecdat_sub$hod,
+         Fc_molar_obs = ecdat_sub$Fc_molar)
+
+val_df_randomwalk = pred_obs_df_randomwalk[-(1:(48*14)),] %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, pi_lower, pi_upper)
+
+val_df_randomwalk$Within_PI = val_df_randomwalk$pi_upper >= val_df_randomwalk$Fc_molar_obs & val_df_randomwalk$Fc_molar_obs >= val_df_randomwalk$pi_lower 
+
+(Error_Summary_randomwalk <- val_df_randomwalk %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Timelight
+pred_obs_df_timelight = as.data.frame(t(ci_statespace), row.names = F) %>%
+  rename(pi_lower = "2.5%", predicted_NEE = "50%", pi_upper = "97.5%") %>%
   mutate(time = ecdat_sub$time,
          doy = ecdat_sub$doy,
          hod = ecdat_sub$hod,
          Fc_molar_obs = ecdat_sub$Fc_molar)
 
 val_df_timelight = pred_obs_df_timelight[-(1:(48*14)),] %>%
-  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper)
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, pi_lower, pi_upper)
+
+val_df_timelight$Within_PI = val_df_timelight$pi_upper >= val_df_timelight$Fc_molar_obs & val_df_timelight$Fc_molar_obs >= val_df_timelight$pi_lower 
+
+(Error_Summary_timelight <- val_df_timelight %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Climatology
 
 val_df_climatology = climatology_pred %>%
   filter(doy %in% unique(val_df_timelight$doy)) %>%
   left_join(val_df_timelight[,c("time","doy", "hod", "Fc_molar_obs")], by = c("doy", "hod")) %>%
-  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper)
+  mutate(pi_upper = predicted_NEE + 1.96*sqrt(mean((val_df_climatology$predicted_NEE - val_df_climatology$Fc_molar_obs)^2, na.rm = TRUE)),
+         pi_lower = predicted_NEE - 1.96*sqrt(mean((val_df_climatology$predicted_NEE - val_df_climatology$Fc_molar_obs)^2, na.rm = TRUE))) %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper, pi_lower, pi_upper)
 
-ggplot(val_df_climatology, aes(x = time)) +
-  #CI band
-  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
+val_df_climatology$Within_PI = val_df_climatology$pi_upper >= val_df_climatology$Fc_molar_obs & val_df_climatology$Fc_molar_obs >= val_df_climatology$pi_lower 
+
+(Error_Summary_climatology <- val_df_climatology %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Out of sample prediction plots ***********
+
+# randomwalk
+ggplot(val_df_randomwalk, aes(x = time)) +
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
               fill = "lightblue", alpha = 0.5) +
   geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
-  # Observations
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Randomwalk model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+
+# climatology
+ggplot(val_df_climatology, aes(x = time)) +
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
   geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
   labs(
     title = "Climatology model with Observations",
@@ -238,12 +287,11 @@ ggplot(val_df_climatology, aes(x = time)) +
   ) +
   theme_classic()
 
+# timelight
 ggplot(val_df_timelight, aes(x = time)) +
-  #CI band
-  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
               fill = "lightblue", alpha = 0.5) +
   geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
-  # Observations
   geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
   labs(
     title = "Dynamic state-space model with Observations",
@@ -252,89 +300,70 @@ ggplot(val_df_timelight, aes(x = time)) +
   ) +
   theme_classic()
 
-val_df_climatology$Within_CI = val_df_climatology$ci_upper >= val_df_climatology$Fc_molar_obs & val_df_climatology$Fc_molar_obs >= val_df_climatology$ci_lower 
 
-(Error_Summary_climatology <- val_df_climatology %>%
-    summarise(
-      N = n(),
-      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
-      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
-      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
-      Coverage_90 = mean(Within_CI, na.rm = TRUE)
-    ))
+# Scatter Plot with Prediction Intervals ************
 
-# Scatter Plot with Prediction Intervals
-ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+# Randomwalk
+ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
   geom_point(size = 2) +
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
   scale_x_continuous(
     limits = c(
-      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+      min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
     )) +
   scale_y_continuous(
     limits = c(
-      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+      min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
     )) +
   labs(
-    title = "Climatology model: predicted against observed",
-    x = "Fc molar observed",
-    y = "Fc molar modelled"
+    title = "Randomwalk model: predicted against observed",
+    x = "Fc molar observed (µmol/m²/s)",
+    y = "Fc molar modelled (µmol/m²/s)"
   ) +
   theme_classic()
 
-# Scatter Plot with Prediction Intervals
-ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
-  geom_point(size = 1, alpha = 0.5) +
-  #geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+# Climatology
+ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
   scale_x_continuous(
     limits = c(
-      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
     )) +
   scale_y_continuous(
     limits = c(
-      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
     )) +
   labs(
     title = "Climatology model: predicted against observed",
-    x = "Fc molar observed",
-    y = "Fc molar modelled"
+    x = "Fc molar observed (µmol/m²/s)",
+    y = "Fc molar modelled (µmol/m²/s)"
   ) +
   theme_classic()
 
-val_df_timelight$Within_CI = val_df_timelight$ci_upper >= val_df_timelight$Fc_molar_obs & val_df_timelight$Fc_molar_obs >= val_df_timelight$ci_lower 
-
-(Error_Summary_timelight <- val_df_timelight %>%
-    summarise(
-      N = n(),
-      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
-      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
-      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
-      Coverage_90 = mean(Within_CI, na.rm = TRUE)
-    ))
-
-# Scatter Plot with Prediction Intervals
-ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+# timelight
+ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
   geom_point(size = 2) +
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
   scale_x_continuous(
     limits = c(
-      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
     )) +
   scale_y_continuous(
     limits = c(
-      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
     )) +
   labs(
     title = "Dynamic state-space model: predicted against observed",
@@ -343,25 +372,131 @@ ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Withi
   ) +
   theme_classic()
 
+# Scatter Plot with points and linear regression line************
 
-ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
-  geom_point(size = 1, alpha = 0.5) +
-  #geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
-  scale_x_continuous(
-    limits = c(
-      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
-    )) +
-  scale_y_continuous(
-    limits = c(
-      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
-      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
-    )) +
-  labs(
-    title = "Dynamic state-space model: predicted against observed",
-    x = "Fc molar observed",
-    y = "Fc molar modelled"
-  ) +
-  theme_classic()
+# # Calculate linear model coefficients
+# lm_fit <- lm(val_df_randomwalk$predicted_NEE ~ val_df_randomwalk$Fc_molar_obs, data = val_df_randomwalk)
+# intercept <- round(coef(lm_fit)[1], 4)
+# slope <- round(coef(lm_fit)[2], 4)
+# correlation = cor(val_df_randomwalk$predicted_NEE, val_df_randomwalk$Fc_molar_obs,use = "complete.obs")
+# correlation_text <- paste0("r = ", round(correlation, 4))
+# 
+# ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+#   geom_point(size = 2) +
+#   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#   geom_abline(slope = slope, intercept = intercept, linewidth = 1) +
+#   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+#   scale_x_continuous(
+#     limits = c(
+#       min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   scale_y_continuous(
+#     limits = c(
+#       min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   labs(
+#     title = "Randomwalk model: predicted against observed",
+#     x = "Fc molar observed (µmol/m²/s)",
+#     y = "Fc molar modelled (µmol/m²/s)"
+#   ) +
+#   annotate("text", x = min(val_df_randomwalk$Fc_molar_obs, 
+#                            val_df_randomwalk$predicted_NEE, na.rm = TRUE),
+#            y = max(val_df_randomwalk$Fc_molar_obs, 
+#                    val_df_randomwalk$predicted_NEE, na.rm = TRUE), 
+#            label = paste0("y = ", round(intercept, 2), " + ", round(slope, 2), "x\n", correlation_text),
+#            hjust = 0, vjust = 1, size = 4.5, color = "black", fontface = "bold.italic") +
+#   theme_classic()
+# 
+# 
+# 
+# # Generate the plot
+# ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE)) +
+#   geom_point(aes(alpha = 0.75), 
+#              size = 2.5, shape = 21, fill = "black", position = position_jitter(width = 0.5), 
+#              show.legend = F, colour = "black", stroke = 0.5) +
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#   labs(
+#     title = paste0("Scatter Plot of Model Residuals: Baseline vs. Project"),
+#     x = "observed",
+#     y = "predicted"
+#   ) +
+#   annotate("text", x = min(val_df_randomwalk$Fc_molar_obs, 
+#                            val_df_randomwalk$predicted_NEE, na.rm = TRUE)+3,
+#            y = max(val_df_randomwalk$Fc_molar_obs, 
+#                    val_df_randomwalk$predicted_NEE, na.rm = TRUE)-5, 
+#            label = paste0("y = ", round(intercept, 2), " + ", round(slope, 2), "x\n", correlation_text),
+#            hjust = 0, vjust = 1, size = 4.5, color = "black", fontface = "bold.italic") +
+#   theme_classic()
+# 
+# 
+# 
+# 
+# 
+# # Randomwalk
+# ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+#   geom_point(size = 2, alpha = 0.5) +
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+#   scale_x_continuous(
+#     limits = c(
+#       min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   scale_y_continuous(
+#     limits = c(
+#       min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   labs(
+#     title = "Randomwalk model: predicted against observed",
+#     x = "Fc molar observed (µmol/m²/s)",
+#     y = "Fc molar modelled (µmol/m²/s)"
+#   ) +
+#   theme_classic()
+# 
+# # Climatology
+# ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+#   geom_point(size = 2, alpha = 0.5) +
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+#   scale_x_continuous(
+#     limits = c(
+#       min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   scale_y_continuous(
+#     limits = c(
+#       min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   labs(
+#     title = "Climatology model: predicted against observed",
+#     x = "Fc molar observed (µmol/m²/s)",
+#     y = "Fc molar modelled (µmol/m²/s)"
+#   ) +
+#   theme_classic()
+# 
+# # timelight
+# ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+#   geom_point(size = 2, alpha = 0.5) +
+#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#   scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+#   scale_x_continuous(
+#     limits = c(
+#       min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   scale_y_continuous(
+#     limits = c(
+#       min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+#       max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
+#     )) +
+#   labs(
+#     title = "Dynamic state-space model: predicted against observed",
+#     x = "Fc molar observed",
+#     y = "Fc molar modelled"
+#   ) +
+#   theme_classic()
