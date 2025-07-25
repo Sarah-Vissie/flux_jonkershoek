@@ -1,0 +1,116 @@
+---
+title: "Jonkershoek eddy covariance"
+author: "Res, Sarah, Wataru & Zack"
+format: 
+  revealjs:
+    width: 1600
+    height: 900
+    slide-number: true
+    theme: white
+    embed-resources: true
+    code-block-height: 650px
+editor: visual
+---
+
+## Intro
+
+::: {.column width="60%"}
+-   Data 　
+    -   SAEON flux data from the eddy covariance system
+    -   Swartboschkloof, Jonkershoek
+    -   March 2022
+-   Models
+    -   Random walk
+    -   Random walk + covariate (light & temp)
+    -   GAM
+:::
+
+::: {.column width="40%"}
+![flux tower](img/jonkershoek_ec.jpg){width="451"}
+:::
+
+## Model Fitting
+
+::: {.column width="40%"}
+RandomWalk
+
+```{r}
+#| echo: true
+#| eval: false
+model{
+
+  #### Data Model
+  for(t in 1:n){
+    y[t] ~ dnorm(x[t],tau_obs)
+  }
+
+  #### Process Model
+  for(t in 2:n){
+    x[t]~dnorm(x[t-1],tau_add)
+  }
+
+  #### Priors
+  x[1] ~ dnorm(x_ic,tau_ic)
+  tau_obs ~ dgamma(a_obs,r_obs)
+  tau_add ~ dgamma(a_add,r_add)
+}
+```
+:::
+
+::: {.column width="60%"}
+Temp + Light
+
+```{r}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "10,16,18-20"
+model{
+
+  #### Data Model
+  for(t in 1:n){
+    y[t] ~ dnorm(x[t],tau_obs)
+  }
+
+  #### Process Model
+  for(t in 2:n){
+    x[t] <- rho * x[t-1] + b1 * light[t] + b2*temperature[t] + alpha[t-1]
+  }
+
+  #### Priors
+  x[1] ~ dnorm(0,0.1)  # initial condition
+  tau_obs ~ dgamma(1,1)  # observation error
+  for (i in 1:(n-1)) {alpha[i] ~ dnorm(0,tau_add)}
+  tau_add ~ dgamma(1,1) # process error
+  rho ~ dunif(-1,1)  # autocorrelation
+  b1 ~ dnorm(0,0.1) # coefficient for light
+  b2 ~ dnorm(0,0.1)  # coefficient for temperature
+}
+"
+```
+:::
+
+## Forecast
+
+::::: columns
+::: column
+![RandomWalk](img/March2022_random_walk.png)
+:::
+
+::: column
+![Temp+Light](img/March2022_temp_light.png)
+:::
+:::::
+
+## Validation
+
+::::: columns
+::: column
+Plot will come here!
+:::
+
+::: column
+Plot will come here!
+:::
+:::::
+
+## Iteration
