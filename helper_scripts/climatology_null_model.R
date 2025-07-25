@@ -10,6 +10,8 @@ climatology_null_model_prediction = function(input_df) {
   
   newdata$predicted_NEE <- pred$fit
   newdata$se_NEE <- pred$se.fit
+  newdata$ci_lower = predicted_NEE - 1.96 * se_NEE
+  newdata$ci_upper = predicted_NEE + 1.96 * se_NEE
   
   return(newdata)
 }
