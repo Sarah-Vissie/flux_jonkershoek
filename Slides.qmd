@@ -21,7 +21,7 @@ editor: visual
     -   March 2022
 -   Models
     -   Random walk
-    -   Random walk + covariate (light & temp)
+    -   Climatology (+ light & temp)
     -   GAM
 :::
 
@@ -58,7 +58,7 @@ model{
 :::
 
 ::: {.column width="60%"}
-Temp + Light
+Climatology: Temp + Light
 
 ```{r}
 #| echo: true
@@ -91,26 +91,52 @@ model{
 
 ## Forecast
 
-::::: columns
+:::::: columns
 ::: column
-![RandomWalk](img/March2022_random_walk.png)
+![RandomWalk](img/Randomwalk_out_of_sample_predictions.png){width="500"}
 :::
 
 ::: column
-![Temp+Light](img/March2022_temp_light.png)
+![Seasonality](img/GAM_Climatology_out_of_sample_predictions.png){width="500"}
 :::
-:::::
+
+::: column
+![Dynamic SS](img/dynamic_state_space_out_of_sample_predictions.png){width="500"}
+:::
+::::::
 
 ## Validation
 
-::::: columns
+:::::: columns
 ::: column
-Plot will come here!
+![RandomWalk](img/Randomwalk_predicted_versus_observed.png){width="500"}
 :::
 
 ::: column
-Plot will come here!
+![Seasonality](img/GAM_Climatology_predicted_versus_observed.png){width="500"}
 :::
-:::::
 
-## Iteration
+::: column
+![Dynamic SS](img/dynamic_state_space_predicted_versus_observed.png){width="500"}
+:::
+
+::: column
+```{r}
+library(tidyverse)
+tb_rw <- read.csv("validation_error_summary_randomwalk.csv")
+tb_cl <- read.csv("validation_error_summary_GAM_Climatology.csv")
+tb_ds <- read.csv("validation_error_summary_dynamic_state_space.csv")
+
+tb_eval <- rbind(tb_rw, tb_cl, tb_ds)
+tb_eval <- tb_eval %>% 
+  mutate(model = c("Random walk", "Seasonality (GAM)", "Dynamic SS") ) %>% 
+  dplyr::select(model,everything())
+print(tb_eval[,-1])
+
+```
+:::
+::::::
+
+## Validation
+
+![Validation Day vs Night](validation.png)
