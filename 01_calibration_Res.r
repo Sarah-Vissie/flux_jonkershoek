@@ -7,6 +7,7 @@ library(ecoforecastR)
 library(tidyverse)
 
 
+
 # Read data and clean them using a helper function.
 ecdat <- ingest_and_qa()
 
@@ -79,6 +80,12 @@ jags.out   <- coda.samples (model = j.model,
                               n.iter = 1000)
 
 save(jags.out,file = "jagsoutput_randomwalk.Rdata")
+
+
+time.rng = c(1,length(ecdat_sub$time))       ## adjust to zoom in and out
+out <- as.matrix(jags.out)         ## convert from coda to matrix
+x.cols <- grep("^x",colnames(out)) ## grab all columns that start with the letter x
+ci_randomwalk <- apply(out[,x.cols],2,quantile,c(0.025,0.5,0.975)) ## model was fit on log scale
 
 
 # plot time series and fitted model
@@ -184,8 +191,193 @@ dev.off()
 
 # Extract CI from the output matrix from jags.out
 summary(jags.out)
-out.matrix <- as.matrix(jags.out)
-out.matrix[,1:5] # first 5 colums stores b1, b2, rho, tau_add, tau_obs, 3000 rows
 
-ci <- apply(out.matrix[,1:5],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
-t(ci)
+out.matrix <- as.matrix(jags.out) 
+
+ci_statespace <- apply(out.matrix[,grep("^x",colnames(out.matrix))],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
+t(ci_statespace)
+
+# # # # 
+
+# Form validation datasets ************
+
+# Randomwalk
+pred_obs_df_randomwalk = as.data.frame(t(ci_randomwalk), row.names = F) %>%
+  rename(pi_lower = "2.5%", predicted_NEE = "50%", pi_upper = "97.5%") %>%
+  mutate(time = ecdat_sub$time,
+         doy = ecdat_sub$doy,
+         hod = ecdat_sub$hod,
+         Fc_molar_obs = ecdat_sub$Fc_molar)
+
+val_df_randomwalk = pred_obs_df_randomwalk[-(1:(48*14)),] %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, pi_lower, pi_upper)
+
+val_df_randomwalk$Within_PI = val_df_randomwalk$pi_upper >= val_df_randomwalk$Fc_molar_obs & val_df_randomwalk$Fc_molar_obs >= val_df_randomwalk$pi_lower 
+
+(Error_Summary_randomwalk <- val_df_randomwalk %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Timelight
+pred_obs_df_timelight = as.data.frame(t(ci_statespace), row.names = F) %>%
+  rename(pi_lower = "2.5%", predicted_NEE = "50%", pi_upper = "97.5%") %>%
+  mutate(time = ecdat_sub$time,
+         doy = ecdat_sub$doy,
+         hod = ecdat_sub$hod,
+         Fc_molar_obs = ecdat_sub$Fc_molar)
+
+val_df_timelight = pred_obs_df_timelight[-(1:(48*14)),] %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, pi_lower, pi_upper)
+
+val_df_timelight$Within_PI = val_df_timelight$pi_upper >= val_df_timelight$Fc_molar_obs & val_df_timelight$Fc_molar_obs >= val_df_timelight$pi_lower 
+
+(Error_Summary_timelight <- val_df_timelight %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Climatology
+
+val_df_climatology = climatology_pred %>%
+  filter(doy %in% unique(val_df_timelight$doy)) %>%
+  left_join(val_df_timelight[,c("time","doy", "hod", "Fc_molar_obs")], by = c("doy", "hod")) %>%
+  mutate(pi_upper = predicted_NEE + 1.96*sqrt(mean((val_df_climatology$predicted_NEE - val_df_climatology$Fc_molar_obs)^2, na.rm = TRUE)),
+         pi_lower = predicted_NEE - 1.96*sqrt(mean((val_df_climatology$predicted_NEE - val_df_climatology$Fc_molar_obs)^2, na.rm = TRUE))) %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper, pi_lower, pi_upper)
+
+val_df_climatology$Within_PI = val_df_climatology$pi_upper >= val_df_climatology$Fc_molar_obs & val_df_climatology$Fc_molar_obs >= val_df_climatology$pi_lower 
+
+(Error_Summary_climatology <- val_df_climatology %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_PI, na.rm = TRUE)
+    ))
+
+# Out of sample prediction plots ***********
+
+# randomwalk
+ggplot(val_df_randomwalk, aes(x = time)) +
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Randomwalk model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+
+# climatology
+ggplot(val_df_climatology, aes(x = time)) +
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Climatology model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+# timelight
+ggplot(val_df_timelight, aes(x = time)) +
+  geom_ribbon(aes(ymin = pi_lower, ymax = pi_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Dynamic state-space model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+
+# Scatter Plot with Prediction Intervals ************
+
+# Randomwalk
+ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_randomwalk$Fc_molar_obs, val_df_randomwalk$predicted_NEE, val_df_randomwalk$pi_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Randomwalk model: predicted against observed",
+    x = "Fc molar observed (µmol/m²/s)",
+    y = "Fc molar modelled (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+# Climatology
+ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$pi_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Climatology model: predicted against observed",
+    x = "Fc molar observed (µmol/m²/s)",
+    y = "Fc molar modelled (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+# timelight
+ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = pi_lower, ymax = pi_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$pi_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Dynamic state-space model: predicted against observed",
+    x = "Fc molar observed",
+    y = "Fc molar modelled"
+  ) +
+  theme_classic()
+
+
+
