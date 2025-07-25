@@ -6,8 +6,6 @@ library(rjags)
 library(ecoforecastR)
 library(tidyverse)
 
-
-
 # Read data and clean them using a helper function.
 ecdat <- ingest_and_qa()
 
@@ -274,12 +272,17 @@ ggplot(val_df_randomwalk, aes(x = time)) +
   geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
   geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
   labs(
-    title = "Randomwalk model with Observations",
+    title = "Randomwalk model out-of-sample predictions",
     x = "Date",
     y = "NEE (µmol/m²/s)"
   ) +
   theme_classic()
 
+ggsave("./img/Randomwalk_out_of_sample_predictions.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
 
 # climatology
 ggplot(val_df_climatology, aes(x = time)) +
@@ -288,11 +291,17 @@ ggplot(val_df_climatology, aes(x = time)) +
   geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
   geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
   labs(
-    title = "Climatology model with Observations",
+    title = "Climatology model out-of-sample predictions",
     x = "Date",
     y = "NEE (µmol/m²/s)"
   ) +
   theme_classic()
+
+ggsave("./img/GAM_Climatology_out_of_sample_predictions.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
 
 # timelight
 ggplot(val_df_timelight, aes(x = time)) +
@@ -301,11 +310,17 @@ ggplot(val_df_timelight, aes(x = time)) +
   geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
   geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
   labs(
-    title = "Dynamic state-space model with Observations",
+    title = "Dynamic state-space model out-of-sample predictions",
     x = "Date",
     y = "NEE (µmol/m²/s)"
   ) +
   theme_classic()
+
+ggsave("./img/dynamic_state_space_out_of_sample_predictions.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
 
 
 # Scatter Plot with Prediction Intervals ************
@@ -333,6 +348,12 @@ ggplot(val_df_randomwalk, aes(x = Fc_molar_obs, y = predicted_NEE, colour = With
   ) +
   theme_classic()
 
+ggsave("./img/Randomwalk_predicted_versus_observed.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
+
 # Climatology
 ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
   geom_point(size = 2) +
@@ -355,6 +376,13 @@ ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Wit
     y = "Fc molar modelled (µmol/m²/s)"
   ) +
   theme_classic()
+
+ggsave("./img/GAM_Climatology_predicted_versus_observed.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
+
 
 # timelight
 ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_PI)) +
@@ -379,5 +407,8 @@ ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Withi
   ) +
   theme_classic()
 
-
-
+ggsave("./img/dynamic_state_space_predicted_versus_observed.png",
+       width = 17,
+       height = 12,
+       units = "cm",
+       dpi = 300)
