@@ -7,35 +7,11 @@ library(ecoforecastR)
 library(tidyverse)
 
 
-# Run the first few code chunks in the README.Rmd file to read in the data and do some cleaning.
-
-ecdat <- read_delim("data/Jonkershoek_EC_all.csv", delim = ";")
-ecdat$time = lubridate::parse_date_time(ecdat$TIMESTAMP,orders = "ymd HM")
-
-ecdat$LE[which(ecdat$LE > 400)] = NA ## remove implausible values
-ecdat$LE[which(ecdat$LE < -100)] = NA ## remove implausible values
-hist(ecdat$LE,breaks = 100)
-
-ecdat$Fc_molar[which(ecdat$Fc_molar > 20)] = NA ## remove implausible values
-ecdat$Fc_molar[which(ecdat$Fc_molar < -30)] = NA ## remove implausible values
-hist(ecdat$Fc_molar,breaks = 100)
-
-## ustar filtering
-ecdat$Fc_molar[which(ecdat$u_star < 0.3)] = NA
-ecdat$LE[which(ecdat$u_star < 0.3)] = NA
-
-## quality control filtering
-## scores defined in Appendix F of EasyFlux manual, with 1 being the best score and 9 being the worst
-ecdat$Fc_molar[which(ecdat$Fc_qc_grade > 6)] = NA
-ecdat$LE[which(ecdat$LE_qc_grade > 6)] = NA
-
-# This code take it from there.
-
-month = lubridate::month(ecdat$time)
-year = lubridate::year(ecdat$time)
+# Read data and clean them using a helper function.
+ecdat <- ingest_and_qa()
 
 # pick a subset (one month)
-ecdat_sub <- ecdat[month==3 & year==2022,]
+ecdat_sub <- ecdat[ecdat$month=='03' & ecdat$year=='2022',]
 
 hist(ecdat_sub$Fc_molar)
 
@@ -96,10 +72,13 @@ jags.out   <- coda.samples (model = j.model,
                             n.iter = 1000)
 plot(jags.out)
 dic.samples(j.model, 2000)
+gelman.diag(jags.out)
 
 jags.out   <- coda.samples (model = j.model,
                               variable.names = c("x","tau_add","tau_obs"),
-                              n.iter = 10000)
+                              n.iter = 1000)
+
+save(jags.out,file = "jagsoutput_randomwalk.Rdata")
 
 
 # plot time series and fitted model
@@ -192,7 +171,9 @@ gelman.diag(jags.out)
 
 jags.out   <- coda.samples (model = j.model,
                             variable.names = c("x","tau_add","tau_obs","rho","b1","b2"),
-                            n.iter = 1000)
+                            n.iter = 5000)
+
+save(jags.out,file = "jagsoutput_temp_light.Rdata")
 
 
 # plot time series and fitted model
@@ -201,3 +182,10 @@ pdf("March2022_temp_light.pdf",8,4)
 plot_ts()
 dev.off()
 
+# Extract CI from the output matrix from jags.out
+summary(jags.out)
+out.matrix <- as.matrix(jags.out)
+out.matrix[,1:5] # first 5 colums stores b1, b2, rho, tau_add, tau_obs, 3000 rows
+
+ci <- apply(out.matrix[,1:5],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
+t(ci)
