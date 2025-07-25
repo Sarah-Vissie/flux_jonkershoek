@@ -238,7 +238,6 @@ ggplot(val_df_climatology, aes(x = time)) +
   ) +
   theme_classic()
 
-
 ggplot(val_df_timelight, aes(x = time)) +
   #CI band
   geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
@@ -250,5 +249,77 @@ ggplot(val_df_timelight, aes(x = time)) +
     title = "Dynamic state-space model with Observations",
     x = "Date",
     y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+val_df_climatology$Within_CI = val_df_climatology$ci_upper >= val_df_climatology$Fc_molar_obs & val_df_climatology$Fc_molar_obs >= val_df_climatology$ci_lower 
+
+# Scatter Plot with Prediction Intervals
+ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Climatology model: predicted against observed",
+    x = "Fc molar observed",
+    y = "Fc molar modelled"
+  ) +
+  theme_classic()
+
+val_df_timelight$Within_CI = val_df_timelight$ci_upper >= val_df_timelight$Fc_molar_obs & val_df_timelight$Fc_molar_obs >= val_df_timelight$ci_lower 
+# Scatter Plot with Prediction Intervals
+ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+  geom_point(size = 2) +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Dynamic state-space model: predicted against observed",
+    x = "Fc molar observed",
+    y = "Fc molar modelled"
+  ) +
+  theme_classic()
+
+
+ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+  geom_point(size = 1, alpha = 0.5) +
+  #geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_timelight$Fc_molar_obs, val_df_timelight$predicted_NEE, val_df_timelight$ci_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Dynamic state-space model: predicted against observed",
+    x = "Fc molar observed",
+    y = "Fc molar modelled"
   ) +
   theme_classic()
