@@ -22,7 +22,7 @@ daytime <- c("05","06","07","08","09","10","11","12","13","14","15","16","17","1
 nighttime <- c("21","22","23","00","01","02","03","04")
 
 modelcheckingplots <- function(out){
-  par(mfrow=c(2,3))
+  par(mfrow=c(2,3),mar=c(4,4,0,0))
   out1 <- out
   out <- out[out$hour%in%daytime,]
   plot(out$Fc_molar, out$`50%`, ylim=c(min(out$`2.5%`), max(max(out$`97.5%`))))
@@ -52,4 +52,6 @@ modelcheckingplots(out_insample)
 # examining out-of sample predictions
 out_validation <- out_merged[-(1:(48*14)),]
 
+png("validation.png",600,450)
 modelcheckingplots(out_validation)
+dev.off()
