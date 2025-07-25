@@ -208,3 +208,47 @@ out.matrix[,1:5] # first 5 colums stores b1, b2, rho, tau_add, tau_obs, 3000 row
 
 ci <- apply(out.matrix[,1:5],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
 t(ci)
+
+pred_obs_df_timelight = as.data.frame(t(ci), row.names = F) %>%
+  rename(ci_lower = "2.5%", predicted_NEE = "50%", ci_upper = "97.5%") %>%
+  mutate(time = ecdat_sub$time,
+         doy = ecdat_sub$doy,
+         hod = ecdat_sub$hod,
+         Fc_molar_obs = ecdat_sub$Fc_molar)
+
+val_df_timelight = pred_obs_df_timelight[-(1:(48*14)),] %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper)
+
+val_df_climatology = climatology_pred %>%
+  filter(doy %in% unique(val_df_timelight$doy)) %>%
+  left_join(val_df_timelight[,c("time","doy", "hod", "Fc_molar_obs")], by = c("doy", "hod")) %>%
+  select(time, doy, hod, Fc_molar_obs, predicted_NEE, ci_lower, ci_upper)
+
+ggplot(val_df_climatology, aes(x = time)) +
+  #CI band
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
+  # Observations
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Climatology model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
+
+
+ggplot(val_df_timelight, aes(x = time)) +
+  #CI band
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = predicted_NEE), color = "black", size = 0.5, alpha = 0.5) +
+  # Observations
+  geom_point(aes(y = Fc_molar_obs), color = "red", size = 0.5, alpha = 0.7) +
+  labs(
+    title = "Dynamic state-space model with Observations",
+    x = "Date",
+    y = "NEE (µmol/m²/s)"
+  ) +
+  theme_classic()
