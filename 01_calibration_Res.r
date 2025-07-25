@@ -201,3 +201,10 @@ pdf("March2022_temp_light.pdf",8,4)
 plot_ts()
 dev.off()
 
+# Extract CI from the output matrix from jags.out 
+summary(jags.out)
+out.matrix <- as.matrix(jags.out)
+out.matrix[,1:5] # first 5 colums stores b1, b2, rho, tau_add, tau_obs, 3000 rows
+
+ci <- apply(out.matrix[,1:5],2,quantile,c(0.025,0.5,0.975)) ## get ci  from the matrix
+t(ci)
