@@ -7,11 +7,12 @@ library(ecoforecastR)
 library(tidyverse)
 
 
-# Run the first few code chunks in the README.Rmd file to read in the data and do some cleaning.
 
+# Read data and clean them using a helper function.
 ecdat <- ingest_and_qa()
+
 # pick a subset (one month)
-ecdat_sub <- ecdat[ecdat$month=="03" & ecdat$year=="2022",]
+ecdat_sub <- ecdat[ecdat$month=='03' & ecdat$year=='2022',]
 
 hist(ecdat_sub$Fc_molar)
 
@@ -72,10 +73,13 @@ jags.out   <- coda.samples (model = j.model,
                             n.iter = 1000)
 plot(jags.out)
 dic.samples(j.model, 2000)
+gelman.diag(jags.out)
 
 jags.out   <- coda.samples (model = j.model,
                               variable.names = c("x","tau_add","tau_obs"),
-                              n.iter = 10000)
+                              n.iter = 1000)
+
+save(jags.out,file = "jagsoutput_randomwalk.Rdata")
 
 
 time.rng = c(1,length(ecdat_sub$time))       ## adjust to zoom in and out
@@ -174,7 +178,9 @@ gelman.diag(jags.out)
 
 jags.out   <- coda.samples (model = j.model,
                             variable.names = c("x","tau_add","tau_obs","rho","b1","b2"),
-                            n.iter = 1000)
+                            n.iter = 5000)
+
+save(jags.out,file = "jagsoutput_temp_light.Rdata")
 
 
 # plot time series and fitted model
@@ -183,7 +189,7 @@ pdf("March2022_temp_light.pdf",8,4)
 plot_ts()
 dev.off()
 
-# Extract CI from the output matrix from jags.out 
+# Extract CI from the output matrix from jags.out
 summary(jags.out)
 
 out.matrix <- as.matrix(jags.out) 
