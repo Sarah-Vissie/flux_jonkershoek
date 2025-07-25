@@ -254,6 +254,15 @@ ggplot(val_df_timelight, aes(x = time)) +
 
 val_df_climatology$Within_CI = val_df_climatology$ci_upper >= val_df_climatology$Fc_molar_obs & val_df_climatology$Fc_molar_obs >= val_df_climatology$ci_lower 
 
+(Error_Summary_climatology <- val_df_climatology %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_CI, na.rm = TRUE)
+    ))
+
 # Scatter Plot with Prediction Intervals
 ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
   geom_point(size = 2) +
@@ -277,7 +286,40 @@ ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Wit
   ) +
   theme_classic()
 
+# Scatter Plot with Prediction Intervals
+ggplot(val_df_climatology, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
+  geom_point(size = 1, alpha = 0.5) +
+  #geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("TRUE" = "black", "FALSE" = "red"), guide = "none") +
+  scale_x_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+    )) +
+  scale_y_continuous(
+    limits = c(
+      min(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_lower, na.rm = TRUE) - 1,
+      max(val_df_climatology$Fc_molar_obs, val_df_climatology$predicted_NEE, val_df_climatology$ci_upper, na.rm = TRUE) + 1
+    )) +
+  labs(
+    title = "Climatology model: predicted against observed",
+    x = "Fc molar observed",
+    y = "Fc molar modelled"
+  ) +
+  theme_classic()
+
 val_df_timelight$Within_CI = val_df_timelight$ci_upper >= val_df_timelight$Fc_molar_obs & val_df_timelight$Fc_molar_obs >= val_df_timelight$ci_lower 
+
+(Error_Summary_timelight <- val_df_timelight %>%
+    summarise(
+      N = n(),
+      MAE = mean(abs(predicted_NEE - Fc_molar_obs), na.rm = TRUE),
+      MSE = mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE),
+      RMSE = sqrt(mean((predicted_NEE - Fc_molar_obs)^2, na.rm = TRUE)),
+      Coverage_90 = mean(Within_CI, na.rm = TRUE)
+    ))
+
 # Scatter Plot with Prediction Intervals
 ggplot(val_df_timelight, aes(x = Fc_molar_obs, y = predicted_NEE, colour = Within_CI)) +
   geom_point(size = 2) +
